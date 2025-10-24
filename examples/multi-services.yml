@@ -1,0 +1,37 @@
+# 多服务配置示例
+# 当证书更新后需要重启多个服务时使用
+
+communication:
+  socket_path: "/tmp/acme-reloader/socket/acme-reloader.sock"
+  timeout: 60
+  retry_count: 3
+  retry_interval: 5
+
+logging:
+  level: "INFO"
+  file: "./logs/acme-reloader.log"
+  history_file: "./logs/acme-reloader.history"
+  console: true
+
+services:
+  nginx:
+    command: "nginx -t && systemctl reload nginx"
+    enabled: true
+    timeout: 15
+
+  haproxy:
+    command: "systemctl reload haproxy"
+    enabled: true
+    timeout: 10
+
+  postfix:
+    command: "systemctl reload postfix"
+    enabled: true
+    timeout: 10
+
+  dovecot:
+    command: "systemctl reload dovecot"
+    enabled: true
+    timeout: 10
+
+working_directory: "/opt/acme-reloader"

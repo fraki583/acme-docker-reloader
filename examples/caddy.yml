@@ -1,0 +1,22 @@
+# Caddy 服务配置示例
+
+communication:
+  socket_path: "/tmp/acme-reloader/socket/acme-reloader.sock"
+  timeout: 30
+  retry_count: 3
+  retry_interval: 5
+
+logging:
+  level: "INFO"
+  file: "./logs/acme-reloader.log"
+  history_file: "./logs/acme-reloader.history"
+  console: true
+
+services:
+  caddy:
+    # Caddy 优雅重载
+    command: "systemctl reload caddy"
+    enabled: true
+    timeout: 15
+
+working_directory: "/opt/acme-reloader"

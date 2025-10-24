@@ -1,0 +1,22 @@
+[Unit]
+Description=acme-reloader-host - Certificate Reload Daemon
+Documentation=https://github.com/AptS-1547/acme-docker-reloader
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__INSTALL_PATH__
+ExecStart=/bin/bash __INSTALL_PATH__/bin/acme-reloader-host.sh
+Environment="CONFIG_FILE=__INSTALL_PATH__/config/config.yml"
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+
+# 安全加固
+NoNewPrivileges=false
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

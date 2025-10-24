@@ -1,0 +1,60 @@
+# acme-reloader 配置文件示例
+# 复制此文件为 config.yml 并根据需要修改
+
+# 通信配置
+communication:
+  # Socket 文件路径
+  socket_path: "/tmp/acme-reloader/socket/acme-reloader.sock"
+  # 超时时间（秒）
+  timeout: 30
+  # 重试次数
+  retry_count: 3
+  # 重试间隔（秒）
+  retry_interval: 5
+  # 心跳间隔（秒），0 表示禁用
+  heartbeat_interval: 0
+
+# 日志配置
+logging:
+  # 日志级别: DEBUG, INFO, WARN, ERROR
+  level: "INFO"
+  # 日志文件路径
+  file: "./logs/acme-reloader.log"
+  # 操作历史文件
+  history_file: "./logs/acme-reloader.history"
+  # 日志最大大小（MB），超过后轮转
+  max_size: 10
+  # 保留的日志文件数量
+  max_backups: 5
+  # 是否同时输出到控制台
+  console: true
+
+# 服务重启配置
+services:
+  # 可以配置多个服务
+  # 服务名只是标识符，可以随意命名
+  nginx:
+    # 重启命令
+    command: "systemctl reload nginx"
+    # 是否启用此服务
+    enabled: true
+    # 超时时间（秒），0 使用全局配置
+    timeout: 0
+    # 执行前置命令（可选）
+    pre_command: ""
+    # 执行后置命令（可选）
+    post_command: ""
+
+  # 示例：多个服务
+  # caddy:
+  #   command: "systemctl reload caddy"
+  #   enabled: false
+  #   timeout: 10
+
+# 工作目录
+working_directory: "/opt/acme-reloader"
+
+# 安全配置（预留）
+security:
+  # 是否启用消息验证
+  message_validation: true

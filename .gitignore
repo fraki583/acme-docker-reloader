@@ -1,0 +1,52 @@
+# 日志文件
+logs/
+*.log
+*.history
+
+# 运行时文件
+socket/
+*.sock
+*.pid
+
+# 配置文件（保护敏感信息）
+config/config.yml
+# 但保留示例配置
+!config/config.example.yml
+
+# SSL 证书
+ssl/
+*.pem
+*.key
+*.crt
+*.csr
+
+# acme.sh 配置
+acme-config/
+
+# 备份文件
+*.bak
+*.backup
+*.old
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 临时文件
+*.tmp
+tmp/
+temp/
+
+# 系统文件
+Thumbs.db
+ehthumbs.db
+Desktop.ini
