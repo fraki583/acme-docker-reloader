@@ -13,14 +13,14 @@ services:
     command: sh -c "apk add --no-cache bash && exec crond -n -s -m off"
     volumes:
       # SSL 证书存储目录 - 证书将保存在这里
-      - ./ssl:/ssl
+      - acme-ssl:/ssl
 
       # acme.sh 配置目录 - 存储账号信息和证书配置
-      - ./acme-config:/acme.sh
+      - acme-config:/acme.sh
 
       # Socket 通信目录 - 用于与宿主机 acme-reloader-host 通信
       # 这是核心：通过这个目录实现容器到宿主机的通知
-      - ./acme-reloader:/acme-reloader
+      - acme-reloader:/acme-reloader
 
       # 挂载客户端脚本 - 容器内调用这个脚本通知宿主机
       - ./bin/acme-reloader.sh:/acme-reloader.sh:ro
@@ -45,6 +45,44 @@ services:
       # - DP_Id=your_dnspod_id
       # - DP_Key=your_dnspod_key
       - DOCKER_MODE=true
+
+# ============================================================
+# Volumes 定义
+# ============================================================
+# 这里使用绑定挂载，将容器内的数据映射到宿主机的目录
+# 方便备份和管理
+# 如果你的 Nginx 或其他服务在不同的 Docker Compose 项目中运行，
+# 您仅需要在对应的项目中设置相同的 Volume 名称即可共享数据
+# 如：
+# volumes:
+#   acme-ssl:
+#     external: true
+# ============================================================
+
+volumes:
+  acme-ssl:
+    name: acme-ssl
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./ssl
+
+  acme-config:
+    name: acme-config
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./acme-config
+
+  acme-reloader:
+    name: acme-reloader
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./acme-reloader
 
 # ============================================================
 # 使用说明
