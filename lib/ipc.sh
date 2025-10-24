@@ -1,73 +1,77 @@
 #!/bin/bash
 # ipc.sh - 进程间通信模块
-# 提供基于命名管道的健壮 IPC 机制
+# 使用两个 named pipe 实现双向通信
 
 # IPC 状态
-IPC_SOCKET=""
+IPC_REQUEST_PIPE=""
+IPC_RESPONSE_PIPE=""
 IPC_TIMEOUT=30
 IPC_RETRY_COUNT=3
 IPC_RETRY_INTERVAL=5
 
 # 消息格式
 # 格式: MESSAGE_TYPE|TIMESTAMP|DATA
-# 示例: REQUEST|1234567890|restart
+# 示例: REQUEST|1234567890|reload
 #       RESPONSE|1234567890|Complete
 #       ERROR|1234567890|Command failed
 
 # 初始化 IPC 配置
 function ipc_init() {
-    IPC_SOCKET=$(config_get "communication.socket_path")
+    local socket_base=$(config_get "communication.socket_path")
+    # 去掉文件名，获取目录
+    local socket_dir=$(dirname "$socket_base")
+    IPC_REQUEST_PIPE="${socket_dir}/request.pipe"
+    IPC_RESPONSE_PIPE="${socket_dir}/response.pipe"
+
     IPC_TIMEOUT=$(config_get "communication.timeout")
     IPC_RETRY_COUNT=$(config_get "communication.retry_count")
     IPC_RETRY_INTERVAL=$(config_get "communication.retry_interval")
 
-    log_debug "IPC initialized: socket=$IPC_SOCKET, timeout=$IPC_TIMEOUT"
+    log_debug "IPC initialized: request=$IPC_REQUEST_PIPE, response=$IPC_RESPONSE_PIPE, timeout=$IPC_TIMEOUT"
 }
 
-# 创建 socket
-function ipc_create_socket() {
-    local socket_path="$1"
-    local socket_dir=$(dirname "$socket_path")
-
-    # 清理旧的 socket
-    if [[ -e "$socket_path" ]]; then
-        log_warn "Removing existing socket: $socket_path"
-        rm -f "$socket_path"
-    fi
+# 创建两个 pipe（服务端用）
+function ipc_create_pipes() {
+    local socket_dir=$(dirname "$IPC_REQUEST_PIPE")
 
     # 创建目录
     if ! mkdir -p "$socket_dir" 2>/dev/null; then
-        log_error "Failed to create socket directory: $socket_dir"
+        log_error "Failed to create pipe directory: $socket_dir"
         return 1
     fi
 
-    # 创建命名管道
-    if ! mkfifo "$socket_path" 2>/dev/null; then
-        log_error "Failed to create named pipe: $socket_path"
+    # 清理旧的 pipes
+    rm -f "$IPC_REQUEST_PIPE" "$IPC_RESPONSE_PIPE" 2>/dev/null
+
+    # 创建请求 pipe
+    if ! mkfifo "$IPC_REQUEST_PIPE" 2>/dev/null; then
+        log_error "Failed to create request pipe: $IPC_REQUEST_PIPE"
         return 1
     fi
 
-    log_info "Socket created: $socket_path"
+    # 创建响应 pipe
+    if ! mkfifo "$IPC_RESPONSE_PIPE" 2>/dev/null; then
+        log_error "Failed to create response pipe: $IPC_RESPONSE_PIPE"
+        rm -f "$IPC_REQUEST_PIPE"
+        return 1
+    fi
+
+    log_info "Pipes created: request=$IPC_REQUEST_PIPE, response=$IPC_RESPONSE_PIPE"
     return 0
 }
 
-# 检查 socket 是否存在
-function ipc_socket_exists() {
-    local socket_path="${1:-$IPC_SOCKET}"
-    [[ -p "$socket_path" ]]
+# 检查 pipe 是否存在
+function ipc_pipes_exist() {
+    [[ -p "$IPC_REQUEST_PIPE" && -p "$IPC_RESPONSE_PIPE" ]]
 }
 
-# 清理 socket
+# 清理 pipes
 function ipc_cleanup() {
-    local socket_path="${1:-$IPC_SOCKET}"
+    rm -f "$IPC_REQUEST_PIPE" "$IPC_RESPONSE_PIPE" 2>/dev/null
+    log_debug "Pipes cleaned up"
 
-    if [[ -e "$socket_path" ]]; then
-        rm -f "$socket_path"
-        log_debug "Socket cleaned up: $socket_path"
-    fi
-
-    # 清理socket目录（���果为空）
-    local socket_dir=$(dirname "$socket_path")
+    # 清理目录（如果为空）
+    local socket_dir=$(dirname "$IPC_REQUEST_PIPE")
     rmdir "$socket_dir" 2>/dev/null || true
 }
 
@@ -92,107 +96,49 @@ function ipc_parse_message() {
     echo "$msg_type $timestamp $data"
 }
 
-# 发送消息（带超时和重试）
-function ipc_send() {
-    local socket_path="$1"
-    local message="$2"
-    local timeout="${3:-$IPC_TIMEOUT}"
-
-    log_debug "Sending message to $socket_path: $message"
-
-    local attempt=0
-    while [[ $attempt -lt $IPC_RETRY_COUNT ]]; do
-        ((attempt++))
-
-        if ! ipc_socket_exists "$socket_path"; then
-            log_error "Socket does not exist: $socket_path"
-            if [[ $attempt -lt $IPC_RETRY_COUNT ]]; then
-                log_info "Retrying in ${IPC_RETRY_INTERVAL}s... (attempt $attempt/$IPC_RETRY_COUNT)"
-                sleep "$IPC_RETRY_INTERVAL"
-                continue
-            fi
-            return 1
-        fi
-
-        # 使用 timeout 防止写入阻塞
-        if timeout "$timeout" bash -c "echo '$message' > '$socket_path'" 2>/dev/null; then
-            log_debug "Message sent successfully"
-            return 0
-        else
-            local exit_code=$?
-            if [[ $exit_code -eq 124 ]]; then
-                log_error "Send timeout after ${timeout}s"
-            else
-                log_error "Failed to send message (exit code: $exit_code)"
-            fi
-
-            if [[ $attempt -lt $IPC_RETRY_COUNT ]]; then
-                log_info "Retrying in ${IPC_RETRY_INTERVAL}s... (attempt $attempt/$IPC_RETRY_COUNT)"
-                sleep "$IPC_RETRY_INTERVAL"
-            fi
-        fi
-    done
-
-    log_error "Failed to send message after $IPC_RETRY_COUNT attempts"
-    return 1
-}
-
-# 接收消息（带超时）
-function ipc_receive() {
-    local socket_path="$1"
-    local timeout="${2:-$IPC_TIMEOUT}"
-
-    log_debug "Waiting for message on $socket_path (timeout: ${timeout}s)"
-
-    if ! ipc_socket_exists "$socket_path"; then
-        log_error "Socket does not exist: $socket_path"
-        return 1
-    fi
-
-    # 使用 timeout 防止读取阻塞
-    local message
-    if message=$(timeout "$timeout" cat "$socket_path" 2>/dev/null); then
-        log_debug "Message received: $message"
-        echo "$message"
-        return 0
-    else
-        local exit_code=$?
-        if [[ $exit_code -eq 124 ]]; then
-            log_error "Receive timeout after ${timeout}s"
-        else
-            log_error "Failed to receive message (exit code: $exit_code)"
-        fi
-        return 1
-    fi
-}
-
 # 发送并等待响应（客户端用）
 function ipc_request() {
-    local socket_path="$1"
+    # 第一个参数被忽略（兼容性）
     local request_data="$2"
     local timeout="${3:-$IPC_TIMEOUT}"
 
+    log_info "Sending request to host..."
+
+    # 检查 pipes 是否存在
+    if ! ipc_pipes_exist; then
+        log_error "Communication pipes not found"
+        log_error "Request pipe: $IPC_REQUEST_PIPE"
+        log_error "Response pipe: $IPC_RESPONSE_PIPE"
+        log_error "Please ensure acme-reloader-host is running"
+        return 1
+    fi
+
     local request_msg=$(ipc_build_message "REQUEST" "$request_data")
+    log_debug "Sending: $request_msg"
 
-    if ! ipc_send "$socket_path" "$request_msg" "$timeout"; then
+    # 发送请求到 request pipe
+    if ! timeout "$timeout" bash -c "echo '$request_msg' > '$IPC_REQUEST_PIPE'" 2>/dev/null; then
+        log_error "Failed to send request (timeout or pipe closed)"
         return 1
     fi
 
-    log_info "Waiting for response..."
-    sleep 2  # 给服务端处理时间
+    log_info "Request sent, waiting for response..."
 
+    # 从 response pipe 读取响应
     local response
-    if ! response=$(ipc_receive "$socket_path" "$timeout"); then
-        log_error "No response received"
+    if ! response=$(timeout "$timeout" cat "$IPC_RESPONSE_PIPE" 2>/dev/null); then
+        log_error "No response received (timeout or pipe closed)"
         return 1
     fi
+
+    log_debug "Received: $response"
 
     # 解析响应
     read -r msg_type timestamp data <<< "$(ipc_parse_message "$response")"
 
     case "$msg_type" in
         RESPONSE)
-            log_info "Response received: $data"
+            log_info "Response: $data"
             echo "$data"
             return 0
             ;;
@@ -207,44 +153,22 @@ function ipc_request() {
     esac
 }
 
-# 发送响应（服务端用）
-function ipc_respond() {
-    local socket_path="$1"
-    local response_data="$2"
-    local is_error="${3:-false}"
-
-    local msg_type="RESPONSE"
-    if [[ "$is_error" == "true" ]]; then
-        msg_type="ERROR"
-    fi
-
-    local response_msg=$(ipc_build_message "$msg_type" "$response_data")
-
-    if ! ipc_send "$socket_path" "$response_msg" 10; then
-        log_error "Failed to send response"
-        return 1
-    fi
-
-    log_debug "Response sent: $response_data"
-    return 0
-}
-
 # 监听并处理请求（服务端用）
 function ipc_listen() {
-    local socket_path="$1"
-    local callback="$2"  # 回调函数，处理收到的请求
+    # 第一个参数被忽略（兼容性）
+    local callback="$2"
 
-    if ! ipc_socket_exists "$socket_path"; then
-        log_error "Socket does not exist: $socket_path"
+    if ! ipc_pipes_exist; then
+        log_error "Pipes do not exist"
         return 1
     fi
 
-    log_info "Listening on $socket_path..."
+    log_info "Listening on request pipe: $IPC_REQUEST_PIPE"
 
     while true; do
+        # 从 request pipe 读取（阻塞）
         local message
-        # 非阻塞式读取，超时后继续循环（支持信号中断）
-        if message=$(timeout 1 cat "$socket_path" 2>/dev/null); then
+        if read -r message < "$IPC_REQUEST_PIPE" 2>/dev/null; then
             log_debug "Received message: $message"
 
             # 解析消息
@@ -258,27 +182,37 @@ function ipc_listen() {
             log_info "Processing request: $data"
 
             # 调用回调处理请求
+            local response_msg
             if $callback "$data"; then
-                ipc_respond "$socket_path" "Complete" false
+                response_msg=$(ipc_build_message "RESPONSE" "Complete")
+                log_info "Request completed successfully"
             else
-                ipc_respond "$socket_path" "Failed" true
+                response_msg=$(ipc_build_message "ERROR" "Failed")
+                log_error "Request processing failed"
+            fi
+
+            # 发送响应到 response pipe
+            log_debug "Sending response: $response_msg"
+            if ! echo "$response_msg" > "$IPC_RESPONSE_PIPE" 2>/dev/null; then
+                log_error "Failed to send response (client may have disconnected)"
+            fi
+        else
+            # 读取失败，可能是 pipe 被关闭或中断
+            local exit_code=$?
+            if [[ $exit_code -ne 0 ]]; then
+                log_warn "Read from pipe interrupted or closed (exit code: $exit_code)"
+                sleep 0.5
             fi
         fi
-
-        # 允许信号中断
-        sleep 0.1
     done
 }
 
 # 导出函数
 export -f ipc_init
-export -f ipc_create_socket
-export -f ipc_socket_exists
+export -f ipc_create_pipes
+export -f ipc_pipes_exist
 export -f ipc_cleanup
 export -f ipc_build_message
 export -f ipc_parse_message
-export -f ipc_send
-export -f ipc_receive
 export -f ipc_request
-export -f ipc_respond
 export -f ipc_listen

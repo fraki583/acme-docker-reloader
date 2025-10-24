@@ -24,11 +24,19 @@ source "$LIB_DIR/logger.sh"
 source "$LIB_DIR/config.sh"
 source "$LIB_DIR/ipc.sh"
 
-# Socket 路径（可以通过环境变量覆盖）
-SOCKET_PATH="${ACME_RELOADER_SOCKET:-$SOCKET_BASE/socket/acme-reloader.sock}"
-
 # 超时设置（秒）
 TIMEOUT="${ACME_RELOADER_TIMEOUT:-30}"
+
+# 客户端的简化 IPC 初始化（不依赖配置文件）
+function client_ipc_init() {
+    # 直接设置 pipe 路径，不读取配置文件
+    local socket_dir="${SOCKET_BASE}/socket"
+    IPC_REQUEST_PIPE="${socket_dir}/request.pipe"
+    IPC_RESPONSE_PIPE="${socket_dir}/response.pipe"
+    IPC_TIMEOUT="${TIMEOUT}"
+
+    log_debug "Client IPC initialized: request=$IPC_REQUEST_PIPE, response=$IPC_RESPONSE_PIPE"
+}
 
 # 主函数
 function main() {
@@ -42,33 +50,29 @@ function main() {
     # 简化的日志配置（容器端只输出到控制台）
     log_init "" "INFO" "true" ""
 
+    # 初始化 IPC 配置（客户端版本，不需要配置文件）
+    client_ipc_init
+
     log_info "acme-reloader client starting..."
-    log_info "Socket path: $SOCKET_PATH"
+    log_info "Request pipe: $IPC_REQUEST_PIPE"
+    log_info "Response pipe: $IPC_RESPONSE_PIPE"
     log_info "Request type: $request_type"
 
-    # 检查 socket 是否存在
-    if [[ ! -p "$SOCKET_PATH" ]]; then
-        log_error "Socket not found: $SOCKET_PATH"
+    # 检查 pipes 是否存在
+    if ! ipc_pipes_exist; then
+        log_error "Communication pipes not found"
         log_error "Please ensure:"
         log_error "  1. acme-reloader-host.sh is running on the host"
-        log_error "  2. The socket directory is properly mounted to the container"
-        log_error "     Example: -v /tmp/acme-reloader:/tmp/acme-reloader"
+        log_error "  2. The pipe directory is properly mounted to the container"
+        log_error "     Example: -v /path/to/acme-reloader:/acme-reloader"
         exit 1
     fi
-
-    # 初始化 IPC（使用自定义配置）
-    IPC_SOCKET="$SOCKET_PATH"
-    IPC_TIMEOUT="$TIMEOUT"
-    IPC_RETRY_COUNT=3
-    IPC_RETRY_INTERVAL=5
 
     log_info "Sending reload request to host..."
 
     # 发送请求并等待响应
     local response
-    if response=$(ipc_request "$SOCKET_PATH" "$request_type" "$TIMEOUT"); then
-        log_info "Response from host: $response"
-
+    if response=$(ipc_request "" "$request_type" "$TIMEOUT"); then
         if [[ "$response" == "Complete" ]]; then
             log_info "✓ Service reload completed successfully"
             exit 0

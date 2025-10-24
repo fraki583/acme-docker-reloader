@@ -48,17 +48,17 @@ function config_parse() {
     local config_file="$1"
 
     if [[ ! -f "$config_file" ]]; then
-        log_warn "Config file not found: $config_file, using defaults"
+        echo "[WARN] Config file not found: $config_file, using defaults" >&2
         return 1
     fi
 
-    log_debug "Parsing config file: $config_file"
+    echo "[DEBUG] Parsing config file: $config_file" >&2
 
     local current_section=""
     local line_num=0
 
     while IFS= read -r line || [[ -n "$line" ]]; do
-        ((line_num++))
+        line_num=$((line_num + 1))
 
         # 跳过空行和注释
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
@@ -66,31 +66,17 @@ function config_parse() {
         # 检测section（顶级键，无缩进）
         if [[ "$line" =~ ^([a-zA-Z_][a-zA-Z0-9_]*):$ ]]; then
             current_section="${BASH_REMATCH[1]}"
-            log_debug "Found section: $current_section"
+            echo "[DEBUG] Found section: $current_section" >&2
             continue
         fi
 
-        # 解析键值对（有缩进）
-        if [[ "$line" =~ ^[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*):[[:space:]]*(.*)$ ]]; then
-            local key="${BASH_REMATCH[1]}"
-            local value="${BASH_REMATCH[2]}"
-            value=$(config_trim "$value")
-
-            if [[ -n "$current_section" ]]; then
-                local full_key="${current_section}.${key}"
-                CONFIG["$full_key"]="$value"
-                log_debug "Loaded config: $full_key = $value"
-            fi
-            continue
-        fi
-
-        # 解析服务配置（services 下的二级嵌套）
+        # 解析服务配置（services 下的二级嵌套）- 优先处理
         if [[ "$current_section" == "services" ]]; then
-            # 服务名定义
-            if [[ "$line" =~ ^[[:space:]]+([a-zA-Z_][a-zA-Z0-9_-]*):$ ]]; then
+            # 服务名定义（单层缩进，值为空）
+            if [[ "$line" =~ ^[[:space:]]+([a-zA-Z_][a-zA-Z0-9_-]*):[[:space:]]*$ ]]; then
                 local service_name="${BASH_REMATCH[1]}"
                 CONFIG["services._list_"]="${CONFIG[services._list_]:-} $service_name"
-                log_debug "Found service: $service_name"
+                echo "[DEBUG] Found service: $service_name" >&2
                 continue
             fi
 
@@ -106,20 +92,35 @@ function config_parse() {
 
                 if [[ -n "$last_service" ]]; then
                     CONFIG["services.${last_service}.${attr_key}"]="$attr_value"
-                    log_debug "Loaded service config: services.${last_service}.${attr_key} = $attr_value"
+                    echo "[DEBUG] Loaded service config: services.${last_service}.${attr_key} = $attr_value" >&2
                 fi
+                continue
             fi
+        fi
+
+        # 解析普通键值对（有缩进）
+        if [[ "$line" =~ ^[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*):[[:space:]]*(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]}"
+            local value="${BASH_REMATCH[2]}"
+            value=$(config_trim "$value")
+
+            if [[ -n "$current_section" ]]; then
+                local full_key="${current_section}.${key}"
+                CONFIG["$full_key"]="$value"
+                echo "[DEBUG] Loaded config: $full_key = $value" >&2
+            fi
+            continue
         fi
     done < "$config_file"
 
-    log_info "Config file loaded: $config_file"
+    echo "[INFO] Config file loaded: $config_file" >&2
     return 0
 }
 
 # 获取配置值
 function config_get() {
     local key="$1"
-    local default_value="$2"
+    local default_value="${2:-}"
 
     local value="${CONFIG[$key]:-$default_value}"
     echo "$value"
@@ -135,7 +136,7 @@ function config_get_services() {
 function config_get_service() {
     local service="$1"
     local attr="$2"
-    local default_value="$3"
+    local default_value="${3:-}"
 
     local key="services.${service}.${attr}"
     config_get "$key" "$default_value"

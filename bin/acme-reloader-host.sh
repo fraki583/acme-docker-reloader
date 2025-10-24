@@ -62,29 +62,18 @@ function main() {
     # 初始化 IPC
     ipc_init
 
-    local socket_path=$(config_get "communication.socket_path")
-    local socket_dir=$(dirname "$socket_path")
-
-    # 确保 socket 目录存在且可写
-    if ! mkdir -p "$socket_dir" 2>/dev/null; then
-        log_error "Failed to create socket directory: $socket_dir"
-        log_error "Please check your permissions or run with sudo if needed"
-        exit 1
-    fi
-
-    # 创建 socket
-    if ! ipc_create_socket "$socket_path"; then
-        log_error "Failed to create socket, exiting"
+    # 创建 pipes
+    if ! ipc_create_pipes; then
+        log_error "Failed to create pipes, exiting"
         exit 1
     fi
 
     log_info "acme-reloader-host started successfully"
-    log_info "Listening on: $socket_path"
-    log_info "Press Ctrl+C to stop"
+    log_info "Listening for requests..."
     echo ""
 
     # 开始监听
-    ipc_listen "$socket_path" service_handle_reload_request
+    ipc_listen "" service_handle_reload_request
 
     # 正常退出不会到这里，除非 ipc_listen 异常返回
     log_error "Listener exited unexpectedly"
