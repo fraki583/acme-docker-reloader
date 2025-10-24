@@ -52,8 +52,8 @@ docker-compose up -d
 ### 申请证书
 
 ```bash
-# 进入容器
-docker exec -it acme.sh ash
+# 进入容器（bash 已自动安装）
+docker exec -it acme.sh bash
 
 # 首次使用：注册账号
 acme.sh --register-account -m your@email.com

@@ -1,6 +1,7 @@
 #!/bin/bash
 # acme-reloader.sh - 容器端客户端脚本
 # 在 acme.sh 容器中调用，通知宿主机重启服务
+# 注意：需要在容器中安装 bash（Alpine: apk add bash）
 
 set -euo pipefail
 

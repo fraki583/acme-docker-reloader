@@ -10,7 +10,7 @@ services:
     image: neilpang/acme.sh:latest
     container_name: acme.sh
     restart: always
-    command: daemon
+    command: sh -c "apk add --no-cache bash && exec crond -n -s -m off"
     volumes:
       # SSL 证书存储目录 - 证书将保存在这里
       - ./ssl:/ssl
